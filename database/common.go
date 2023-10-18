@@ -9,10 +9,10 @@ type Repository interface {
 
 func PrepareAndQuery(conn *sql.DB, query string, args ...any) (*sql.Rows, error) {
 	statement, err := conn.Prepare(query)
-	defer statement.Close()
 	if err != nil {
 		return nil, err
 	}
+	defer statement.Close()
 
 	rows, err := statement.Query(args)
 	if err != nil {
@@ -24,12 +24,12 @@ func PrepareAndQuery(conn *sql.DB, query string, args ...any) (*sql.Rows, error)
 
 func PrepareAndExecute(conn *sql.DB, query string, args ...any) (*int64, error) {
 	statement, err := conn.Prepare(query)
-	defer statement.Close()
 	if err != nil {
 		return nil, err
 	}
+	defer statement.Close()
 
-	result, err := statement.Exec(args)
+	result, err := statement.Exec(args...)
 	if err != nil {
 		return nil, err
 	}

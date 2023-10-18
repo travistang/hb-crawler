@@ -23,7 +23,7 @@ func CrawlEventList(sessionId *string) (error, *EventListResponse) {
 
 	// TODO: Complete this
 	var responseData EventListResponse
-	res, err := client.R().
+	_, err := client.R().
 		EnableTrace().
 		SetResult(&responseData).
 		Get(string(hb.EventListEndpoint))

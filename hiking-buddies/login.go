@@ -2,12 +2,15 @@ package hiking_buddies
 
 import (
 	"context"
+	"fmt"
+	"hb-crawler/rating-gain/database"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/chromedp"
 	"github.com/corpix/uarand"
+	"github.com/sirupsen/logrus"
 )
 
 type Credential struct {
@@ -19,11 +22,8 @@ const (
 	passwordInput = "//*/input[@name='password']"
 	loginButton   = "//*/button[@type='submit']"
 
-	logoutButton = `//*/a[@href='/routes/logout_user/']`
-
 	loginCookieName = "sessionid"
-
-	screenshotQuality = 0o644
+	csrfCookieName  = "csrftoken"
 )
 
 func createHeaders() network.Headers {
@@ -66,6 +66,7 @@ func retrieveLoginCookie(cookie *CookieCredential) chromedp.Tasks {
 		}),
 	}
 }
+
 func performLoginSteps(credential *Credential, cookie *CookieCredential) chromedp.Tasks {
 	return chromedp.Tasks{
 		network.Enable(),
@@ -87,15 +88,65 @@ func performLoginSteps(credential *Credential, cookie *CookieCredential) chromed
 	}
 }
 
-func Login(credential *Credential) (error, *CookieCredential) {
+func doLogin(credential *Credential) (*CookieCredential, error) {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	var cookie CookieCredential
 	err := chromedp.Run(ctx, performLoginSteps(credential, &cookie))
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, &cookie
+	return &cookie, nil
+}
+
+func getCachedCredential(repo *database.LoginCredentialRepository, credential *Credential) (*CookieCredential, error) {
+	savedCredential := database.LoginCredentialRecord{}
+	now := time.Now()
+	ageThreshold := now.Add(time.Duration(-3) * time.Hour).Unix()
+
+	logrus.Debugf("Retrieving credentials for user %s newer than time %d", credential.Email, ageThreshold)
+	err := repo.GetCredential(&savedCredential, credential.Email, ageThreshold)
+	if err != nil {
+		return nil, err
+	}
+
+	if savedCredential.Username != credential.Email {
+		return nil, fmt.Errorf("no eligible credential for user %s", credential.Email)
+	}
+
+	return &CookieCredential{
+		SessionId: savedCredential.SessionId,
+		CSRFToken: "",
+	}, nil
+}
+
+func cacheCredential(
+	repo *database.LoginCredentialRepository,
+	credential *Credential,
+	cookie *CookieCredential,
+) error {
+	return repo.SaveCredential(&database.LoginCredentialRecord{
+		SessionId: cookie.SessionId,
+		Username:  credential.Email,
+	})
+}
+
+func Login(repo *database.LoginCredentialRepository, credential *Credential) (*CookieCredential, error) {
+	cached, _ := getCachedCredential(repo, credential)
+	if cached != nil {
+		return cached, nil
+	}
+
+	cookie, err := doLogin(credential)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cacheCredential(repo, credential, cookie); err != nil {
+		return nil, err
+	}
+
+	return cookie, nil
 }

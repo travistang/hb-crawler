@@ -2,6 +2,9 @@ package database
 
 import (
 	"database/sql"
+	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type EventRepository struct {
@@ -10,26 +13,21 @@ type EventRepository struct {
 
 type EventRecord struct {
 	Id, RouteId, OrganizerId, Points int
+	Date                             time.Time
 	Title                            string
 }
 
 func (repo *EventRepository) Migrate() error {
+	log.Debugf("Migrating events repository...")
+
 	query := `
 		CREATE TABLE IF NOT EXISTS events(
 			id INTEGER PRIMARY KEY,
 			title TEXT NOT NULL,
 			routeId INTEGER NOT NULL,
-			points INTEGER,
+			date INTEGER DEFAULT CURRENT_TIMESTAMP,
 			organizerId INTEGER NOT NULL
 		);
-
-		CREATE TABLE IF NOT EXISTS eventParticipations(
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			eventId INTEGER,
-			userId INTEGER,
-			FOREIGN KEY(eventId) REFERENCES events(id),
-			FOREIGN KEY(userId) REFERENCES users(id)
-		)
 	`
 	_, err := repo.db.Exec(query)
 	return err
@@ -39,26 +37,6 @@ func (repo *EventRepository) Conn() *sql.DB {
 	return repo.db
 }
 
-// func (repo *EventRepository) GetEventById(id int) (*EventRecord, error) {
-// 	query := `
-// 		SELECT
-// 			id, title, points,
-// 			users.id
-// 		FROM
-// 			events
-// 			LEFT JOIN eventParticipations ON events.id = eventParticipations.eventId
-// 			LEFT JOIN users ON users.id = eventParticipations.userId
-// 		WHERE id=?
-// 	`
-// 	rows, err := PrepareAndExecute(repo.Conn(), query, id)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	event := EventRecord{}
-
-// 	for rows.Next() {
-// 		rows.Scan(&event.Id)
-// 	}
-
-// }
+func CreateEventRepository(db *sql.DB) *EventRepository {
+	return &EventRepository{db: db}
+}

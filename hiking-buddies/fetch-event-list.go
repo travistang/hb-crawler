@@ -1,45 +1,38 @@
 package hiking_buddies
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
-
-	"github.com/corpix/uarand"
-	"github.com/go-resty/resty/v2"
 )
 
 type EventListResponse map[string][]Event
+type PastEventListResponse struct {
+	Results []Event
+}
 
-func CrawlEventList(cookieCredential *CookieCredential) (error, *EventListResponse) {
-	client := resty.New()
-	cookie := cookieCredential.AsCookie()
-	for k, v := range cookie {
-		client.SetCookie(&http.Cookie{
-			Name:  k,
-			Value: v,
-		})
-	}
-
-	client.SetHeaders(map[string]string{
-		"Accept":     "application/json",
-		"User-Agent": uarand.GetRandom(),
-	})
-
-	var responseData EventListResponse
+func doFetch[R interface{}](url URL, cookieCredential *CookieCredential, result *R) (*R, error) {
+	client := prepareRestClient(cookieCredential)
 	res, err := client.R().
 		EnableTrace().
-		SetResult(&responseData).
-		Get(string(EventListEndpoint))
+		SetResult(&result).
+		Get(string(url))
 
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	statusCode := res.StatusCode()
 	if statusCode != 200 {
-		return errors.New(fmt.Sprintf("Expected status code 200, got %d instead", statusCode)), nil
+		err := fmt.Errorf("expected status code 200, got %d instead", statusCode)
+		return nil, err
 	}
 
-	return nil, &responseData
+	return result, nil
+}
+
+func FetchUpcomingEvents(cookieCredential *CookieCredential) (*EventListResponse, error) {
+	return doFetch(EventListEndpoint, cookieCredential, &EventListResponse{})
+}
+
+func FetchPastEvents(cookieCredential *CookieCredential) (*PastEventListResponse, error) {
+	return doFetch(PastEventListEndpoint, cookieCredential, &PastEventListResponse{})
 }
