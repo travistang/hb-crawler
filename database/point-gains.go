@@ -33,6 +33,7 @@ func (repo *PointGainsRepository) Migrate() error {
 		CREATE TABLE IF NOT EXISTS pointsGain(
 			eventId INTEGER NOT NULL,
 			userId INTEGER NOT NULL,
+			routePoints INTEGER NOT NULL,
 			pointsBefore INTEGER NOT NULL,
 			pointsAfter INTEGER,
 
@@ -49,14 +50,14 @@ func (repo *PointGainsRepository) CreatePointsGainEntry(
 ) error {
 	query := `
 		INSERT OR IGNORE INTO pointsGain(
-			eventId, userId, pointsBefore, pointsAfter
+			eventId, userId, routePoints, pointsBefore, pointsAfter
 		) VALUES(?, ?, ?, ?)
 		ON CONFLICT(eventId, userId) DO UPDATE SET
 			pointsBefore=excluded.pointsBefore
 	`
 	_, err := PrepareAndExecute(
 		repo.Conn(), query,
-		pointsGain.EventId, pointsGain.UserId,
+		pointsGain.EventId, pointsGain.UserId, pointsGain.RoutePoints,
 		pointsGain.UserPointsBefore, pointsGain.UserPointsAfter,
 	)
 	return err
@@ -88,4 +89,32 @@ func (repo *PointGainsRepository) UpdatePointsGainEntry(
 	}
 
 	return nil
+}
+
+func (repo *PointGainsRepository) GetPointGainsByEventId(id int) (*[]PointGainRecord, error) {
+	query := `
+		SELECT eventId, userId, routePoints, pointsBefore, pointsAfter
+		FROM pointsGain
+		WHERE eventId=?
+	`
+
+	rows, err := repo.Conn().Query(query, id)
+	if err != nil {
+		return nil, err
+	}
+
+	records := []PointGainRecord{}
+	for rows.Next() {
+		var nextRecord PointGainRecord
+		if err := rows.Scan(
+			&nextRecord.EventId, &nextRecord.UserId,
+			&nextRecord.RoutePoints, &nextRecord.UserPointsBefore, &nextRecord.UserPointsAfter,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, nextRecord)
+	}
+
+	return &records, nil
 }

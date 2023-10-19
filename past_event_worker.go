@@ -50,44 +50,53 @@ func (w *PastEventWorker) processRecentPastEvent(
 	event *hb.Event,
 	credential *hb.CookieCredential,
 ) (bool, error) {
-	participantIds := event.AllParticipantsId()
-	route := event.Route.ToRouteRecord()
-	w.logger.Debugf("Found route in event: %+v\n", route)
-	routeRepo := w.repository.Route
-	if _, err := routeRepo.SaveRoute(route); err != nil {
-		w.logger.Errorf("Failed to save route: %+v\n", err)
+	w.logger.Infof("Treating event %s as a recent past event", event.Title)
+
+	pointGains, _ := w.repository.PointGains.GetPointGainsByEventId(event.ID)
+	if pointGains != nil && len(*pointGains) > 0 {
+		w.logger.Infof("Refuse to process recent past event as %d related point gains event is found", len(*pointGains))
 		return false, nil
 	}
 
+	w.logger.Infof("Fetching route points for route '%s' under event '%s'", event.Route.RouteTitle, event.Title)
 	var routeRecord database.RouteRecord
 	if err := hb.GetRoutePoints(&hb.GetRoutePointsParams{
-		Repo:       routeRepo,
-		Id:         route.Id,
+		Repo:       w.repository.Route,
+		Id:         event.Route.RouteID,
 		Record:     &routeRecord,
 		Credential: credential,
 	}); err != nil {
 		return false, nil
 	}
 
-	w.logger.Debugf("Route record is now %+v\n", routeRecord)
-
-	for _, userId := range participantIds {
-		currentUserPoints, err := hb.FetchUserPoints(userId, credential)
-		if err != nil {
-			w.logger.Warnf("Unable to fetch current points for userId %d\n", userId)
-			continue
-		}
-
-		if err := w.repository.PointGains.CreatePointsGainEntry(&database.PointGainRecord{
-			EventId:          event.ID,
-			RoutePoints:      *(routeRecord.Points),
-			UserId:           userId,
-			UserPointsBefore: *currentUserPoints,
-		}); err != nil {
-			w.logger.Warnf("Unable to save points gain entry for user %d in event %d", userId, event.ID)
-		}
+	w.logger.Infof("Fetching participant lists of event '%s'", event.Title)
+	ids, err := hb.FetchEventParticipants(&hb.FetchEventParticipantsParams{
+		Id:         event.ID,
+		Credential: credential,
+	})
+	if err != nil {
+		return false, nil
 	}
 
+	for _, userId := range *ids {
+		w.logger.Infof("Fetching ")
+		currentUserPoints, err := hb.FetchUserPoints(userId, credential)
+		if err != nil {
+			w.logger.Warnf("Failed to fetch current points for user %d", userId)
+			continue
+		}
+		if err := w.repository.PointGains.CreatePointsGainEntry(&database.PointGainRecord{
+			UserId:           userId,
+			UserPointsBefore: *currentUserPoints,
+			RoutePoints:      *routeRecord.Points,
+			EventId:          event.ID,
+		}); err != nil {
+			w.logger.Warnf(
+				"Failed to save current points (%d) for user %d: %+v",
+				*currentUserPoints, userId, err,
+			)
+		}
+	}
 	return true, nil
 }
 
@@ -95,8 +104,13 @@ func (w *PastEventWorker) processPointsAssignedEvent(
 	event *hb.Event,
 	credential *hb.CookieCredential,
 ) (bool, error) {
-	participantIds := event.AllParticipantsId()
-	for _, userId := range participantIds {
+	pointGainRecords, err := w.repository.PointGains.GetPointGainsByEventId(event.ID)
+	if err != nil {
+		return false, err
+	}
+
+	for _, pointGain := range *pointGainRecords {
+		userId := pointGain.UserId
 		currentUserPoints, err := hb.FetchUserPoints(userId, credential)
 		if err != nil {
 			w.logger.Warnf("Unable to fetch current points for userId %d\n", userId)
@@ -144,7 +158,7 @@ const (
 	ShouldProcess
 )
 
-func (w *PastEventWorker) shouldProceed() ProceedSignal {
+func (w *PastEventWorker) getProceedSignal() ProceedSignal {
 	if !w.shouldRun {
 		return ShouldStop
 	}
@@ -160,6 +174,7 @@ func (w *PastEventWorker) shouldProceed() ProceedSignal {
 	}
 	return ShouldIgnore
 }
+
 func (w *PastEventWorker) StartProcessing(wg *sync.WaitGroup) {
 	if w.shouldRun {
 		w.logger.Warn("Refuse to run an already running worker")
@@ -171,7 +186,7 @@ func (w *PastEventWorker) StartProcessing(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		for {
-			signal := w.shouldProceed()
+			signal := w.getProceedSignal()
 			if signal == ShouldStop {
 				w.logger.Info("Stopping worker...")
 				wg.Done()
@@ -188,11 +203,13 @@ func (w *PastEventWorker) StartProcessing(wg *sync.WaitGroup) {
 			credential, err := hb.Login(w.repository.Login, w.credential)
 			if err != nil {
 				w.logger.Warnf("Unable to login as user %s", w.credential.Email)
+				continue
 			}
 
 			fetchResults, err := hb.FetchPastEvents(credential)
 			if err != nil {
 				w.logger.Warnf("Unable to fetch events: %+v\n", err)
+				continue
 			}
 
 			for _, event := range fetchResults.Results {
@@ -200,8 +217,7 @@ func (w *PastEventWorker) StartProcessing(wg *sync.WaitGroup) {
 					w.logger.Warnf("failed to process event with id %d: %+v\n", event.ID, err)
 				}
 			}
-			w.logger.Info("Process finished. Waiting for next round.")
-
+			w.logger.Info("Process completed. Waiting for next round.")
 		}
 		w.logger.Info("Process stopped.")
 	}()

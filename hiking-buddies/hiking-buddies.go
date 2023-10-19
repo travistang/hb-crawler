@@ -53,4 +53,5 @@ const (
 	PastEventListEndpoint     URL = "https://www.hiking-buddies.com/api/routes/recent_event_list/"
 	UserDetailsEndpoint       URL = "https://www.hiking-buddies.com/routes/user/"
 	RouteDetailsEndpoint      URL = "https://www.hiking-buddies.com/routes/routes_list/"
+	EventDetailsEndpoint      URL = "https://www.hiking-buddies.com/routes/events/"
 )
