@@ -18,14 +18,3 @@ type Event struct {
 	RouteData       RouteData `json:"route_data"`
 	Title           string    `json:"title"`
 }
-
-func (e *Event) AllParticipantsId() []int {
-	ids := []int{
-		e.Organizer.ID,
-	}
-	for _, id := range e.ParticipantsId {
-		ids = append(ids, id)
-	}
-
-	return ids
-}

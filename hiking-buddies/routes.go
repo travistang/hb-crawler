@@ -3,7 +3,7 @@ package hiking_buddies
 import "hb-crawler/rating-gain/database"
 
 type Route struct {
-	RouteTitle    string  `json:"route_title"`
+	RouteTitle    string  `json:"title"`
 	Distance      float64 `json:"distance"`
 	RouteID       int     `json:"id"`
 	ElevationGain int     `json:"elevation_gain"`

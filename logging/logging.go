@@ -1,10 +1,8 @@
 package logging
 
 import (
-	"fmt"
-
+	nested "github.com/antonfisher/nested-logrus-formatter"
 	"github.com/sirupsen/logrus"
-	prefixed "github.com/x-cray/logrus-prefixed-formatter"
 )
 
 type LoggerConfig struct {
@@ -17,8 +15,10 @@ func GetLogger(config *LoggerConfig) *logrus.Logger {
 	fields := logrus.Fields{}
 
 	if len(config.Prefix) > 0 {
-		logger.Formatter = new(prefixed.TextFormatter)
-		fields["prefix"] = fmt.Sprintf("[%s]", config.Prefix)
+		logger.SetFormatter(&nested.Formatter{
+			HideKeys:    true,
+			FieldsOrder: []string{config.Prefix},
+		})
 	}
 
 	if config.Level > 0 {

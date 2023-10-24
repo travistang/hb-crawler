@@ -3,26 +3,30 @@ package hiking_buddies
 import (
 	"context"
 	"fmt"
-	"hb-crawler/rating-gain/database"
-	"hb-crawler/rating-gain/logging"
 	"strconv"
 
-	"github.com/chromedp/cdproto/network"
+	"hb-crawler/rating-gain/database"
+	"hb-crawler/rating-gain/logging"
+
 	"github.com/chromedp/chromedp"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
-	RoutePointsSelector = "//*[@class='map-statistics']//tr[./th[contains(text(), 'Rating')]]/td[last()]"
+	RoutePointsSelector = `document.querySelector("table.table:nth-child(2) > tbody:nth-child(1) > tr:nth-child(6) > td:nth-child(8)").innerText`
 )
 
-func localAndParsePoints(points *int) chromedp.Tasks {
+func locateAndParsePointsForRoute(routeId int, points *int) chromedp.Tasks {
 	var pointsString string
 	return chromedp.Tasks{
-		chromedp.Text(pointsSelector, &pointsString),
+		chromedp.Evaluate(RoutePointsSelector, &pointsString),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			parsedPoint, err := strconv.Atoi(pointsString)
 			if err != nil {
+				log.Warnf(
+					"Failed to retrieve points for route %d, selector got '%s' instead",
+					routeId, pointsString,
+				)
 				return err
 			}
 			*points = parsedPoint
@@ -32,16 +36,11 @@ func localAndParsePoints(points *int) chromedp.Tasks {
 }
 
 func fetchRoutePoints(id int, credential *CookieCredential, points *int) chromedp.Tasks {
+	log.Infof("start crawling points for route %d", id)
 	url := fmt.Sprintf("%s%d/", string(RouteDetailsEndpoint), id)
 	return chromedp.Tasks{
-		network.Enable(),
-		network.SetExtraHTTPHeaders(createHeaders()),
-		setCookies(credential),
-
-		chromedp.Navigate(url),
-
-		chromedp.WaitVisible(RoutePointsSelector),
-		localAndParsePoints(points),
+		baseFetchFunction(url, credential),
+		locateAndParsePointsForRoute(id, points),
 	}
 }
 
@@ -50,7 +49,7 @@ func FetchRoutePoints(id int, credential *CookieCredential) (*int, error) {
 	var points int
 	defer cancel()
 
-	err := chromedp.Run(ctx, fetchUserPoints(credential, id, &points))
+	err := chromedp.Run(ctx, fetchRoutePoints(id, credential, &points))
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +67,10 @@ type GetRoutePointsParams struct {
 func GetRoutePoints(p *GetRoutePointsParams) error {
 	log := logging.GetLogger(&logging.LoggerConfig{
 		Prefix: "Fetch routes",
-		Level:  logrus.DebugLevel,
+		Level:  log.DebugLevel,
 	})
 
-	log.Debug("Getting route points by cache...")
+	log.Debugf("Getting points for route %d by cache...", p.Id)
 
 	var fetchedRoute database.RouteRecord
 	err := p.Repo.GetRouteById(p.Id, &fetchedRoute)
@@ -85,7 +84,7 @@ func GetRoutePoints(p *GetRoutePointsParams) error {
 		return nil
 	}
 
-	log.Debugf("Route %d's point is not cached, fetching...", fetchedRoute.Id)
+	log.Debugf("Route %d's point is not cached, fetching...", p.Id)
 
 	points, err := FetchRoutePoints(p.Id, p.Credential)
 	if err != nil {

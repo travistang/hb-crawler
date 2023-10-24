@@ -1,19 +1,16 @@
 package main
 
 import (
+	"context"
+	"hb-crawler/rating-gain/api"
 	"hb-crawler/rating-gain/database"
 	hb "hb-crawler/rating-gain/hiking-buddies"
+	"hb-crawler/rating-gain/worker"
 	"os"
 	"os/signal"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
-)
-
-const (
-	Username = "opulent_umpires0w@icloud.com"
-	Password = "fygveq-5ruqJa-gusgap"
 )
 
 func registerInterrupt(handlers func()) {
@@ -26,36 +23,45 @@ func registerInterrupt(handlers func()) {
 	}()
 }
 
+func retrieveCredential() *hb.Credential {
+	cred := hb.Credential{}
+	cred.Email = os.Getenv("HB_USERNAME")
+	cred.Password = os.Getenv("HB_PASSWORD")
+
+	if len(cred.Email) == 0 || len(cred.Password) == 0 {
+		log.Fatalf("Missing credential to login")
+	}
+	return &cred
+}
+
 func main() {
 	log.SetLevel(log.DebugLevel)
-	log.Debugf("Starting to crawl hiking buddies...\n")
-	log.Info("Initializing database...\n")
+	credential := retrieveCredential()
 
-	db, err := database.InitializeDatabase("./db.sqlite")
+	log.Info("Initializing database...\n")
+	db, err := database.InitializeDatabase()
 	if err != nil {
 		log.Fatalf("Failed to initialize databse: %+v\n", err)
 	}
-
+	defer db.Close()
 	repo := database.GetRepository(db)
-	workers := sync.WaitGroup{}
 
-	pastEventWorker := CreatePastEventWorker(&PastEventWorkerConfig{
-		Repository: repo,
-		Interval:   time.Hour,
-		Credential: &hb.Credential{
-			Email:    Username,
-			Password: Password,
-		},
+	waitGroup := sync.WaitGroup{}
+	workerGroup := worker.CreateWorkerGroup(repo, credential, &waitGroup)
+	server := api.StartServer(&api.StartServerParams{
+		Addr:        ":8080",
+		Repo:        repo,
+		WaitGroup:   &waitGroup,
+		WorkerGroup: workerGroup,
 	})
 
 	registerInterrupt(func() {
-		log.Info("SIGINT received, stopping worker...")
-		pastEventWorker.Stop()
+		log.Info("SIGINT received, stopping...")
+		workerGroup.Stop()
+		if err := server.Shutdown(context.Background()); err != nil {
+			log.Warnf("failed to shutdown server: %+v\n", err)
+		}
 	})
 
-	pastEventWorker.StartProcessing(&workers)
-	log.Info("Launched")
-	workers.Wait()
-	log.Info("Exiting...")
-
+	waitGroup.Wait()
 }

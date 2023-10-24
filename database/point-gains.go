@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -17,6 +18,12 @@ type PointGainRecord struct {
 	UserId           int
 	UserPointsBefore int
 	UserPointsAfter  *int
+	EventDate        int64
+}
+
+type PointGainsQuery struct {
+	Limit int
+	Skip  int
 }
 
 func CreatePointGainsRepository(db *sql.DB) *PointGainsRepository {
@@ -36,6 +43,7 @@ func (repo *PointGainsRepository) Migrate() error {
 			routePoints INTEGER NOT NULL,
 			pointsBefore INTEGER NOT NULL,
 			pointsAfter INTEGER,
+			eventDate INTEGER NOT NULL,
 
 			PRIMARY KEY (eventId, userId)
 		);
@@ -50,8 +58,8 @@ func (repo *PointGainsRepository) CreatePointsGainEntry(
 ) error {
 	query := `
 		INSERT OR IGNORE INTO pointsGain(
-			eventId, userId, routePoints, pointsBefore, pointsAfter
-		) VALUES(?, ?, ?, ?)
+			eventId, userId, routePoints, pointsBefore, pointsAfter, eventDate
+		) VALUES(?, ?, ?, ?, ?, ?)
 		ON CONFLICT(eventId, userId) DO UPDATE SET
 			pointsBefore=excluded.pointsBefore
 	`
@@ -59,6 +67,7 @@ func (repo *PointGainsRepository) CreatePointsGainEntry(
 		repo.Conn(), query,
 		pointsGain.EventId, pointsGain.UserId, pointsGain.RoutePoints,
 		pointsGain.UserPointsBefore, pointsGain.UserPointsAfter,
+		pointsGain.EventDate,
 	)
 	return err
 }
@@ -76,11 +85,11 @@ func (repo *PointGainsRepository) UpdatePointsGainEntry(
 	query := `
 		UPDATE pointsGain
 		SET pointsAfter=?
-		WHERE eventId=? AND userId=? AND pointsAfter IS NOT NULL
+		WHERE eventId=? AND userId=? AND pointsAfter IS NULL
 	`
 	_, err := PrepareAndExecute(
 		repo.Conn(), query,
-		pointsGain.UserPointsAfter,
+		*pointsGain.UserPointsAfter,
 		pointsGain.EventId, pointsGain.UserId,
 	)
 
@@ -91,9 +100,28 @@ func (repo *PointGainsRepository) UpdatePointsGainEntry(
 	return nil
 }
 
+func extractRowToRecords(rows *sql.Rows) (*[]PointGainRecord, error) {
+	records := []PointGainRecord{}
+	for rows.Next() {
+		var nextRecord PointGainRecord
+		if err := rows.Scan(
+			&nextRecord.EventId, &nextRecord.UserId,
+			&nextRecord.RoutePoints, &nextRecord.UserPointsBefore, &nextRecord.UserPointsAfter,
+			&nextRecord.EventDate,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, nextRecord)
+	}
+
+	return &records, nil
+}
+
 func (repo *PointGainsRepository) GetPointGainsByEventId(id int) (*[]PointGainRecord, error) {
 	query := `
-		SELECT eventId, userId, routePoints, pointsBefore, pointsAfter
+		SELECT 
+			eventId, userId, routePoints, pointsBefore, pointsAfter, eventDate
 		FROM pointsGain
 		WHERE eventId=?
 	`
@@ -103,11 +131,84 @@ func (repo *PointGainsRepository) GetPointGainsByEventId(id int) (*[]PointGainRe
 		return nil, err
 	}
 
+	return extractRowToRecords(rows)
+}
+
+func (repo *PointGainsRepository) GetAllPointGains(queryParams *PointGainsQuery) (*[]PointGainRecord, error) {
+	params := PointGainsQuery{
+		Skip:  0,
+		Limit: -1,
+	}
+	if queryParams != nil {
+		params.Limit = queryParams.Limit
+		params.Skip = queryParams.Skip
+	}
+
+	query := `
+		SELECT 
+			eventId, userId, routePoints, pointsBefore, pointsAfter, eventDate
+		FROM pointsGain
+		ORDER BY eventDate ASC
+		OFFSET ?
+		LIMIT ?
+	`
+	rows, err := repo.Conn().Query(query, params.Skip, params.Limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractRowToRecords(rows)
+}
+
+func (repo *PointGainsRepository) GetDanglingPointsGainEntryToday(targetHour time.Time) (*[]PointGainRecord, error) {
+	query := `
+		SELECT
+			eventId, userId, routePoints, pointsBefore, pointsAfter, eventDate
+		FROM pointsGain
+		WHERE 
+			pointsAfter IS NULL AND
+			eventDate >= ? AND eventDate <= ?
+	`
+	dayStart := time.Date(
+		targetHour.Year(), targetHour.Month(), targetHour.Day(), 0,
+		0, 0, 0, targetHour.Location(),
+	)
+	hourStart := time.Date(
+		targetHour.Year(), targetHour.Month(), targetHour.Day(), targetHour.Hour(),
+		0, 0, 0, targetHour.Location(),
+	)
+	rows, err := repo.Conn().Query(query, dayStart.Unix(), hourStart.Unix())
+	if err != nil {
+		return nil, err
+	}
+
+	return extractRowToRecords(rows)
+}
+
+func (repo *PointGainsRepository) GetValidPointsGainEntry(desiredLimit *int) (*[]PointGainRecord, error) {
+	query := `
+		SELECT
+			routePoints, pointsBefore, pointsAfter
+		FROM pointsGain
+		WHERE
+			pointsAfter IS NOT NULL AND
+			pointsBefore < pointsAfter
+		ORDER BY eventDate DESC
+		LIMIT ?
+	`
+	limit := -1
+	if desiredLimit != nil {
+		limit = *desiredLimit
+	}
+	rows, err := repo.Conn().Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+
 	records := []PointGainRecord{}
 	for rows.Next() {
 		var nextRecord PointGainRecord
 		if err := rows.Scan(
-			&nextRecord.EventId, &nextRecord.UserId,
 			&nextRecord.RoutePoints, &nextRecord.UserPointsBefore, &nextRecord.UserPointsAfter,
 		); err != nil {
 			return nil, err

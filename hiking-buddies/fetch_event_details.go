@@ -8,7 +8,6 @@ import (
 	"hb-crawler/rating-gain/logging"
 	"hb-crawler/rating-gain/utils"
 
-	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/sirupsen/logrus"
 )
@@ -42,13 +41,8 @@ func fetchEventParticipants(p *FetchEventParticipantsParams, log *logrus.Logger,
 	url := fmt.Sprintf("%s%d", EventDetailsEndpoint, p.Id)
 
 	return chromedp.Tasks{
-		network.Enable(),
-		network.SetExtraHTTPHeaders(createHeaders()),
-		setCookies(p.Credential),
+		baseFetchFunction(url, p.Credential),
 
-		chromedp.Navigate(url),
-
-		chromedp.ActionFunc(func(ctx context.Context) error { fmt.Printf("Navigated to %s", url); return nil }),
 		chromedp.WaitVisible(eventSummaryBoxSelector),
 		extractParticipantIds(p, log, ids),
 	}
