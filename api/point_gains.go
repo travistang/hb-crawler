@@ -11,7 +11,8 @@ import (
 const (
 	PointGainsEndpointRoot = "/point-gains"
 	PointGainsList         = "/"
-	PointGainsOfEvent      = "/:id"
+	PointsGainsSampleData  = "/sample"
+	PointGainsOfEvent      = "/event/:id"
 )
 
 type PointGainsApiHandler struct {
@@ -62,8 +63,22 @@ func (handler *PointGainsApiHandler) pointGainsOfEventHandler(c *gin.Context) {
 	sendJSONPayload(c, http.StatusOK, records)
 }
 
+func (handler *PointGainsApiHandler) pointGainsSampleDataHandler(c *gin.Context) {
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil {
+		limit = -1
+	}
+	records, err := handler.repo.PointGains.GetValidPointsGainEntry(&limit)
+	if err != nil {
+		reportError(c, http.StatusInternalServerError, "Failed to retrieve data")
+		return
+	}
+	sendJSONPayload(c, http.StatusOK, records)
+}
+
 func (handler *PointGainsApiHandler) Register(api *gin.Engine) {
 	router := api.Group(PointGainsEndpointRoot)
 	router.GET(PointGainsList, handler.pointGainsListHandler)
+	router.GET(PointsGainsSampleData, handler.pointGainsSampleDataHandler)
 	router.GET(PointGainsOfEvent, handler.pointGainsOfEventHandler)
 }

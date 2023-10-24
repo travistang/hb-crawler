@@ -21,6 +21,12 @@ type PointGainRecord struct {
 	EventDate        int64
 }
 
+type ReducedPointGainRecord struct {
+	RoutePoints      int `json:"route_points"`
+	UserPointsBefore int `json:"points_before"`
+	UserPointsAfter  int `json:"points_after"`
+}
+
 type PointGainsQuery struct {
 	Limit int
 	Skip  int
@@ -185,7 +191,7 @@ func (repo *PointGainsRepository) GetDanglingPointsGainEntryToday(targetHour tim
 	return extractRowToRecords(rows)
 }
 
-func (repo *PointGainsRepository) GetValidPointsGainEntry(desiredLimit *int) (*[]PointGainRecord, error) {
+func (repo *PointGainsRepository) GetValidPointsGainEntry(desiredLimit *int) (*[]ReducedPointGainRecord, error) {
 	query := `
 		SELECT
 			routePoints, pointsBefore, pointsAfter
@@ -205,9 +211,9 @@ func (repo *PointGainsRepository) GetValidPointsGainEntry(desiredLimit *int) (*[
 		return nil, err
 	}
 
-	records := []PointGainRecord{}
+	records := []ReducedPointGainRecord{}
 	for rows.Next() {
-		var nextRecord PointGainRecord
+		var nextRecord ReducedPointGainRecord
 		if err := rows.Scan(
 			&nextRecord.RoutePoints, &nextRecord.UserPointsBefore, &nextRecord.UserPointsAfter,
 		); err != nil {
