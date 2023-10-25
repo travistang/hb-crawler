@@ -15,13 +15,11 @@ type Worker struct {
 	interval        time.Duration
 	LastRunningTime *time.Time
 	logger          *log.Logger
-	credential      *hb.Credential
 	ProcessFunc     WorkerProcessFunc
 }
 
 type WorkerConfig struct {
 	Repository *database.DatabaseRepository
-	Credential *hb.Credential
 	Interval   time.Duration
 }
 
@@ -67,6 +65,18 @@ func (w *Worker) getProceedSignal() ProceedSignal {
 	return ShouldIgnore
 }
 
+func (w *Worker) selectAccount() (*hb.Credential, error) {
+	account, err := w.repository.Login.GetAvailableAccount()
+	if err != nil {
+		return nil, err
+	}
+	hbAccount := hb.Credential{
+		Email:    account.Username,
+		Password: account.Password,
+	}
+	return &hbAccount, nil
+}
+
 func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 	if w.shouldRun {
 		w.logger.Warn("Refuse to run an already running worker")
@@ -94,9 +104,14 @@ func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 			w.LastRunningTime = &now
 			w.logger.Info("Start processing...")
 
-			credential, err := hb.Login(w.repository.Login, w.credential)
+			hbAccount, err := w.selectAccount()
 			if err != nil {
-				w.logger.Warnf("Unable to login as user %s", w.credential.Email)
+				w.logger.Errorf("Unable to retrieve available account: %+v\n", err)
+			}
+
+			credential, err := hb.Login(w.repository.Login, hbAccount)
+			if err != nil {
+				w.logger.Warnf("Unable to login as user %s", hbAccount.Email)
 				continue
 			}
 

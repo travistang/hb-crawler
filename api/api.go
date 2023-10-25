@@ -19,6 +19,7 @@ type StartServerParams struct {
 
 func createApi(params *StartServerParams) *gin.Engine {
 	api := gin.Default()
+
 	api.GET("/healthcheck", func(c *gin.Context) {
 		c.JSON(http.StatusOK, "OK")
 	})
@@ -32,6 +33,11 @@ func createApi(params *StartServerParams) *gin.Engine {
 		workerGroup: params.WorkerGroup,
 	}
 	workerApi.Register(api)
+
+	credentialsApi := CredentialsApiHandler{
+		repo: params.Repo,
+	}
+	credentialsApi.Register(api)
 
 	return api
 }
