@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"hb-crawler/rating-gain/database"
 	hb "hb-crawler/rating-gain/hiking-buddies"
 	"sync"
@@ -70,11 +71,20 @@ func (w *Worker) selectAccount() (*hb.Credential, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if account == nil {
+		return nil, fmt.Errorf("no accounts found")
+	}
 	hbAccount := hb.Credential{
 		Email:    account.Username,
 		Password: account.Password,
 	}
 	return &hbAccount, nil
+}
+
+func (w *Worker) markProcessCompleted() {
+	now := time.Now()
+	w.LastRunningTime = &now
 }
 
 func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
@@ -100,18 +110,19 @@ func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 				continue
 			}
 
-			now := time.Now()
-			w.LastRunningTime = &now
 			w.logger.Info("Start processing...")
 
 			hbAccount, err := w.selectAccount()
 			if err != nil {
 				w.logger.Errorf("Unable to retrieve available account: %+v\n", err)
+				w.markProcessCompleted()
+				continue
 			}
 
 			credential, err := hb.Login(w.repository.Login, hbAccount)
 			if err != nil {
 				w.logger.Warnf("Unable to login as user %s", hbAccount.Email)
+				w.markProcessCompleted()
 				continue
 			}
 
@@ -120,6 +131,7 @@ func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 				Credential: credential,
 			}); err != nil {
 				w.logger.Warnf("Worker encountered error %+v\n", err)
+				w.markProcessCompleted()
 				continue
 			}
 

@@ -1,11 +1,7 @@
 package database
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"database/sql"
-	"encoding/hex"
-	"os"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -29,54 +25,6 @@ type Account struct {
 	Password string `json:"password"`
 }
 
-type RawAccount struct {
-	Username, PasswordHash string
-}
-
-func createCipher() (cipher.Block, error) {
-	key := os.Getenv(PasswordHashEnvVariable)
-	if len(key) == 0 {
-		key = DefaultPasswordHashKey
-	}
-	keyBytes, err := hex.DecodeString(key)
-	if err != nil {
-		return nil, err
-	}
-	cipher, err := aes.NewCipher(keyBytes)
-	if err != nil {
-		return nil, err
-	}
-	return cipher, nil
-}
-
-func (acc *RawAccount) ToAccount() (*Account, error) {
-	cipher, err := createCipher()
-	if err != nil {
-		return nil, err
-	}
-
-	passwordBytes := []byte{}
-	cipher.Decrypt(passwordBytes, []byte(acc.PasswordHash))
-	passwordWithHash := string(passwordBytes[:])
-
-	return &Account{
-		Username: acc.Username,
-		Password: passwordWithHash,
-	}, nil
-}
-
-func (r *RawAccount) FromAccount(acc *Account) error {
-	cipher, err := createCipher()
-	if err != nil {
-		return err
-	}
-	hashedPasswordBytes := []byte{}
-	cipher.Encrypt(hashedPasswordBytes, []byte(acc.Password))
-	r.Username = acc.Username
-	r.PasswordHash = string(hashedPasswordBytes[:])
-	return nil
-}
-
 func CreateLoginCredentialRepository(db *sql.DB) *LoginCredentialRepository {
 	return &LoginCredentialRepository{db: db}
 }
@@ -86,7 +34,7 @@ func (repo *LoginCredentialRepository) Migrate() error {
 	query := `
 		CREATE TABLE IF NOT EXISTS accounts(
 			username TEXT PRIMARY KEY,
-			passwordHash TEXT NOT NULL
+			password TEXT NOT NULL
 		);
 
 		CREATE TABLE IF NOT EXISTS credentials(
@@ -141,28 +89,24 @@ func (repo *LoginCredentialRepository) SaveCredential(credential *LoginCredentia
 
 func (repo *LoginCredentialRepository) GetAvailableAccount() (*Account, error) {
 	query := `
-		SELECT username, passwordHash
+		SELECT username, password
 		FROM accounts
 		WHERE username IN (select username FROM accounts ORDER BY RANDOM() LIMIT 1)
 	`
-	var acc RawAccount
-	if err := repo.Conn().QueryRow(query).Scan(&acc.Username, &acc.PasswordHash); err != nil {
+	var account Account
+	if err := repo.Conn().QueryRow(query).Scan(&account.Username, &account.Password); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
 
-	account, err := acc.ToAccount()
-	if err != nil {
-		return nil, err
-	}
-	return account, nil
+	return &account, nil
 }
 
 func (repo *LoginCredentialRepository) GetAllAvailableAccounts() ([]Account, error) {
 	query := `
-		SELECT username, passwordHash
+		SELECT username, password
 		FROM accounts
 	`
 	accounts := []Account{}
@@ -170,13 +114,13 @@ func (repo *LoginCredentialRepository) GetAllAvailableAccounts() ([]Account, err
 	if err != nil {
 		return accounts, err
 	}
-	var rawAccount RawAccount
+	var account Account
 	for rows.Next() {
-		if err := rows.Scan(&rawAccount.Username, &rawAccount.PasswordHash); err != nil {
+		if err := rows.Scan(&account.Username, &account.Password); err != nil {
 			return []Account{}, err
 		}
 		accounts = append(accounts, Account{
-			Username: rawAccount.Username,
+			Username: account.Username,
 		})
 	}
 
@@ -185,17 +129,12 @@ func (repo *LoginCredentialRepository) GetAllAvailableAccounts() ([]Account, err
 
 func (repo *LoginCredentialRepository) CreateAccount(account *Account) error {
 	query := `
-		INSERT INTO accounts(username, passwordHash)
+		INSERT INTO accounts(username, password)
 		VALUES (?, ?)
 	`
-	var rawAccount RawAccount
-	if err := rawAccount.FromAccount(account); err != nil {
-		return err
-	}
-
 	if _, err := PrepareAndExecute(
 		repo.Conn(), query,
-		rawAccount.Username, rawAccount.PasswordHash,
+		account.Username, account.Password,
 	); err != nil {
 		return err
 	}

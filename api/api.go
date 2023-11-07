@@ -1,6 +1,7 @@
 package api
 
 import (
+	"hb-crawler/rating-gain/analysis"
 	"hb-crawler/rating-gain/database"
 	"hb-crawler/rating-gain/worker"
 	"net/http"
@@ -38,6 +39,13 @@ func createApi(params *StartServerParams) *gin.Engine {
 		repo: params.Repo,
 	}
 	credentialsApi.Register(api)
+
+	estimator, _ := analysis.CreatePointGainEstimator([]float64{analysis.InitialM, analysis.InitialL, 400})
+	analysisApi := AnalysisApiHandler{
+		repo:      params.Repo,
+		estimator: estimator,
+	}
+	analysisApi.Register(api)
 
 	return api
 }
