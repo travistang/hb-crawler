@@ -15,8 +15,10 @@ const (
 )
 
 type PointGainEstimator struct {
-	params []float64
-	base   float64
+	params         []float64
+	exponent       float64
+	exponentFactor float64
+	base           float64
 }
 
 type PointGainEstimatorGrad = PointGainEstimator // gradient of the params of the estimator
@@ -43,31 +45,41 @@ func (e *PointGainEstimator) rateFactor(originalPoint int32, routeRating int32) 
 	return 1 - 1/(1+math.Pow(10, float64(routeRating-originalPoint)/e.base))
 }
 
-func (e *PointGainEstimator) EstimatePointGain(originalPoint int32, routeRating int32) float64 {
-	d := math.Abs(float64(originalPoint) - float64(routeRating))
-	k := float64(0)
-	for i, p := range e.params {
-		k += p * math.Pow(d, float64(len(e.params)-1-i))
+func polynomial(x float64, params []float64) float64 {
+	sum := float64(0)
+	for i, p := range params {
+		exp := len(params) - i - 1
+		sum += p * math.Pow(x, float64(exp))
 	}
-	r := float64(originalPoint) + k*e.rateFactor(originalPoint, routeRating)
-	return r
+	return sum
 }
 
-func (e *PointGainEstimator) GradientAt(pointGain *database.ReducedPointGainRecord) (*PointGainEstimatorGrad, error) {
-	x0 := int32(pointGain.UserPointsBefore)
-	xh := int32(pointGain.RoutePoints)
+/*
+*
 
-	rateFactor := e.rateFactor(x0, xh)
-	diff := float64(pointGain.UserPointsAfter) - float64(e.EstimatePointGain(x0, xh))
-	absDiff := math.Abs(float64(xh - x0))
-	grads := []float64{}
-	for i := range e.params {
-		grads = append(grads, diff*rateFactor*math.Pow(absDiff, float64(len(e.params)-1-i)))
-	}
+	Given original point P_0, route rating R, point P_f after joining the hike is modelled as:
 
-	return &PointGainEstimatorGrad{
-		params: grads,
-	}, nil
+	P_f = P_0 + k(1 - (1 + 10^d/e)^-1)
+
+	where
+		d = |P_0 - R|,
+		k = Ad^B + poly(d, k1, k2, ...) = k1d^n + k2d^(n - 1) + ... + k0
+	in which A, B, e, k1, k2... are parameters:
+		A <- e.exponentFactor
+		B <- e.exponent
+		e <- e.base
+		k1, k2, ... kn <- e.params
+
+*
+*/
+func (e *PointGainEstimator) EstimatePointGain(originalPoint int32, routeRating int32) float64 {
+	d := math.Abs(float64(originalPoint) - float64(routeRating))
+
+	k := polynomial(d, e.params)
+	k += e.exponentFactor * math.Pow(d, e.exponent)
+
+	r := float64(originalPoint) + k*e.rateFactor(originalPoint, routeRating)
+	return r
 }
 
 func createOptimizerProblem(pointGains []database.ReducedPointGainRecord) *optimize.Problem {

@@ -66,6 +66,7 @@ func pointsGainProcessFunc(context *WorkerProcessContext) error {
 	danglingRecords, err := worker.repository.PointGains.GetDanglingPointsGainEntryToday(targetHour)
 	if err != nil {
 		worker.logger.Warnf("Failed to fetch dangling records: %+v\n", err)
+		return err
 	}
 
 	worker.logger.Infof("Found %d dangling records at around %s", len(*danglingRecords), targetHour.UTC())

@@ -30,8 +30,9 @@ type WorkerStatus struct {
 }
 
 type WorkerProcessContext struct {
-	Worker     *Worker
-	Credential *hb.CookieCredential
+	Worker      *Worker
+	Credential  *hb.CookieCredential
+	WorkerState interface{}
 }
 
 type WorkerProcessFunc = func(*WorkerProcessContext) error
