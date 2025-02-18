@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"hb-crawler/rating-gain/database"
 	hb "hb-crawler/rating-gain/hiking-buddies"
 	"sync"
@@ -15,13 +16,11 @@ type Worker struct {
 	interval        time.Duration
 	LastRunningTime *time.Time
 	logger          *log.Logger
-	credential      *hb.Credential
 	ProcessFunc     WorkerProcessFunc
 }
 
 type WorkerConfig struct {
 	Repository *database.DatabaseRepository
-	Credential *hb.Credential
 	Interval   time.Duration
 }
 
@@ -31,8 +30,9 @@ type WorkerStatus struct {
 }
 
 type WorkerProcessContext struct {
-	Worker     *Worker
-	Credential *hb.CookieCredential
+	Worker      *Worker
+	Credential  *hb.CookieCredential
+	WorkerState interface{}
 }
 
 type WorkerProcessFunc = func(*WorkerProcessContext) error
@@ -67,6 +67,27 @@ func (w *Worker) getProceedSignal() ProceedSignal {
 	return ShouldIgnore
 }
 
+func (w *Worker) selectAccount() (*hb.Credential, error) {
+	account, err := w.repository.Login.GetAvailableAccount()
+	if err != nil {
+		return nil, err
+	}
+
+	if account == nil {
+		return nil, fmt.Errorf("no accounts found")
+	}
+	hbAccount := hb.Credential{
+		Email:    account.Username,
+		Password: account.Password,
+	}
+	return &hbAccount, nil
+}
+
+func (w *Worker) markProcessCompleted() {
+	now := time.Now()
+	w.LastRunningTime = &now
+}
+
 func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 	if w.shouldRun {
 		w.logger.Warn("Refuse to run an already running worker")
@@ -90,13 +111,19 @@ func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 				continue
 			}
 
-			now := time.Now()
-			w.LastRunningTime = &now
 			w.logger.Info("Start processing...")
 
-			credential, err := hb.Login(w.repository.Login, w.credential)
+			hbAccount, err := w.selectAccount()
 			if err != nil {
-				w.logger.Warnf("Unable to login as user %s", w.credential.Email)
+				w.logger.Errorf("Unable to retrieve available account: %+v\n", err)
+				w.markProcessCompleted()
+				continue
+			}
+
+			credential, err := hb.Login(w.repository.Login, hbAccount)
+			if err != nil {
+				w.logger.Warnf("Unable to login as user %s", hbAccount.Email)
+				w.markProcessCompleted()
 				continue
 			}
 
@@ -105,6 +132,7 @@ func (w *Worker) StartProcessing(wg *sync.WaitGroup) {
 				Credential: credential,
 			}); err != nil {
 				w.logger.Warnf("Worker encountered error %+v\n", err)
+				w.markProcessCompleted()
 				continue
 			}
 

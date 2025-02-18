@@ -20,7 +20,6 @@ func CreatePastEventWorker(config *WorkerConfig) *Worker {
 		repository:      config.Repository,
 		shouldRun:       false,
 		interval:        config.Interval,
-		credential:      config.Credential,
 		logger:          logger,
 		LastRunningTime: nil,
 		ProcessFunc:     pastEventProcessFunc,

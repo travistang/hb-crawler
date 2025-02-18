@@ -37,17 +37,15 @@ func (c *WorkerGroup) Wait() {
 	c.waitGroup.Wait()
 }
 
-func CreateWorkerGroup(repo *database.DatabaseRepository, cred *hb.Credential, waitGroup *sync.WaitGroup) *WorkerGroup {
+func CreateWorkerGroup(repo *database.DatabaseRepository, waitGroup *sync.WaitGroup) *WorkerGroup {
 	pastEventWorker := CreatePastEventWorker(&WorkerConfig{
 		Repository: repo,
 		Interval:   12 * time.Hour,
-		Credential: cred,
 	})
 
 	pointsGainWorker := CreatePointsGainWorker(&WorkerConfig{
 		Repository: repo,
 		Interval:   time.Hour,
-		Credential: cred,
 	})
 
 	workers := map[string]*Worker{}
@@ -56,7 +54,6 @@ func CreateWorkerGroup(repo *database.DatabaseRepository, cred *hb.Credential, w
 
 	workerGroup := WorkerGroup{
 		Repository: repo,
-		Credential: cred,
 		workers:    workers,
 		waitGroup:  waitGroup,
 	}
